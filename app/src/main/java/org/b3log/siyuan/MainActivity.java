@@ -28,8 +28,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
+import android.os.LocaleList;
 import android.os.Looper;
 import android.os.Message;
 import android.provider.MediaStore;
@@ -77,7 +77,9 @@ import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.TimeZone;
 
 import mobile.Mobile;
@@ -85,8 +87,8 @@ import mobile.Mobile;
 /**
  * 主程序.
  *
- * @author <a href="http://88250.b3log.org">Liang Ding</a>
- * @version 1.1.0.1, Mar 3, 2024
+ * @author <a href="https://88250.b3log.org">Liang Ding</a>
+ * @version 1.1.0.3, Apr 24, 2024
  * @since 1.0.0
  */
 public class MainActivity extends AppCompatActivity implements com.blankj.utilcode.util.Utils.OnAppStatusChangedListener {
@@ -136,7 +138,9 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         AppUtils.registerAppStatusChangedListener(this);
 
         // 使用 Chromium 调试 WebView
-        // WebView.setWebContentsDebuggingEnabled(true);
+        if (Utils.isDebugPackageAndMode(this)) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
 
         // 注册工具栏显示/隐藏跟随软键盘状态
         // Fix https://github.com/siyuan-note/siyuan/issues/9765
@@ -337,10 +341,13 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
 
         serverPort = getAvailablePort();
         final AsyncServer s = AsyncServer.getDefault();
-        // 生产环境绑定 ipv6 回环地址 [::1] 以防止被远程访问
-        s.listen(InetAddress.getLoopbackAddress(), serverPort, server.getListenCallback());
-        // 开发环境绑定所有网卡以便调试
-        //s.listen(null, serverPort, server.getListenCallback());
+        if (Utils.isDebugPackageAndMode(this)) {
+            // 开发环境绑定所有网卡以便调试
+            s.listen(null, serverPort, server.getListenCallback());
+        } else {
+            // 生产环境绑定 ipv6 回环地址 [::1] 以防止被远程访问
+            s.listen(InetAddress.getLoopbackAddress(), serverPort, server.getListenCallback());
+        }
         Utils.LogInfo("http", "HTTP server is listening on port [" + serverPort + "]");
     }
 
@@ -373,19 +380,45 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         }
 
         final String appDir = getFilesDir().getAbsolutePath() + "/app";
-        final Locale locale = getResources().getConfiguration().locale;
+        final Locale locale = LocaleList.getDefault().get(0); // 获取用户的设备首选语言
+        final String language = locale.getLanguage().toLowerCase(); // 获取语言代码
+        final String script = locale.getScript().toLowerCase(); // 获取脚本代码
+        final String country = locale.getCountry().toLowerCase(); // 获取国家代码
         final String workspaceBaseDir = getExternalFilesDir(null).getAbsolutePath();
         final String timezone = TimeZone.getDefault().getID();
         new Thread(() -> {
             final String localIPs = Utils.getIPAddressList();
-            String lang = locale.getLanguage() + "_" + locale.getCountry();
-            if (lang.toLowerCase().contains("cn")) {
-                lang = "zh_CN";
+
+            String langCode;
+            if ("zh".equals(language)) {
+                // 检查是否为简体字脚本
+                if ("hans".equals(script)) {
+                    langCode = "zh_CN"; // 简体中文，使用 zh_CN
+
+                } else if ("hant".equals(script)) {
+                    // 对于繁体字脚本，需要进一步检查国家代码
+                    if ("tw".equals(country)) {
+                        langCode = "zh_CHT"; // 繁体中文对应台湾
+                    } else if ("hk".equals(country)) {
+                        langCode = "zh_CHT"; // 繁体中文对应香港
+                    } else {
+                        langCode = "zh_CHT"; // 其他繁体中文情况也使用 zh_CHT
+                    }
+                } else {
+                    langCode = "zh_CN"; // 如果脚本不是简体或繁体，默认为简体中文
+                }
+
             } else {
-                lang = "en_US";
+                // 对于非中文语言，创建一个映射来定义其他语言代码的对应关系
+                Map<String, String> otherLangMap = new HashMap<>();
+                otherLangMap.put("es", "es_ES"); // 西班牙语使用 es_ES
+                otherLangMap.put("fr", "fr_FR"); // 法语使用 fr_FR
+
+                // 使用 getOrDefault 方法从映射中获取语言代码，如果语言不存在则默认为 en_US
+                langCode = otherLangMap.getOrDefault(language, "en_US");
             }
 
-            Mobile.startKernel("android", appDir, workspaceBaseDir, timezone, localIPs, lang,
+            Mobile.startKernel("android", appDir, workspaceBaseDir, timezone, localIPs, langCode,
                     Build.VERSION.RELEASE +
                             "/SDK " + Build.VERSION.SDK_INT +
                             "/WebView " + webViewVer +
@@ -583,6 +616,11 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         appDirFile.mkdirs();
 
         boolean ret = true;
+        if (Utils.isDebugPackageAndMode(this)) {
+            Log.i("boot", "always unzip assets in debug mode");
+            return ret;
+        }
+
         final File appVerFile = new File(appDir, "VERSION");
         if (appVerFile.exists()) {
             try {
