@@ -88,7 +88,7 @@ import mobile.Mobile;
  * 主程序.
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
- * @version 1.1.0.3, Apr 24, 2024
+ * @version 1.1.0.5, Dec 3, 2024
  * @since 1.0.0
  */
 public class MainActivity extends AppCompatActivity implements com.blankj.utilcode.util.Utils.OnAppStatusChangedListener {
@@ -418,6 +418,11 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
                 langCode = otherLangMap.getOrDefault(language, "en_US");
             }
 
+            if (Utils.isCnChannel(this)) {
+                // Apps in Chinese mainland app stores no longer provide AI access settings https://github.com/siyuan-note/siyuan/issues/13051
+                Mobile.disableFeature("ai");
+            }
+
             Mobile.startKernel("android", appDir, workspaceBaseDir, timezone, localIPs, langCode,
                     Build.VERSION.RELEASE +
                             "/SDK " + Build.VERSION.SDK_INT +
@@ -464,12 +469,8 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
     private void initAppearance() {
         if (needUnzipAssets()) {
             bootLogo.setVisibility(View.VISIBLE);
-            // 不要进度条更平滑一些
-            //bootProgressBar.setVisibility(View.VISIBLE);
-            //bootDetailsText.setVisibility(View.VISIBLE);
 
-            final String dataDir = getFilesDir().getAbsolutePath();
-            final String appDir = dataDir + "/app";
+            final String appDir = getFilesDir().getAbsolutePath() + "/app";
             final File appVerFile = new File(appDir, "VERSION");
 
             setBootProgress("Clearing appearance...", 20);
@@ -610,17 +611,16 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
     }
 
     private boolean needUnzipAssets() {
-        final String dataDir = getFilesDir().getAbsolutePath();
-        final String appDir = dataDir + "/app";
+        final String appDir = getFilesDir().getAbsolutePath() + "/app";
         final File appDirFile = new File(appDir);
         appDirFile.mkdirs();
 
-        boolean ret = true;
         if (Utils.isDebugPackageAndMode(this)) {
             Log.i("boot", "always unzip assets in debug mode");
-            return ret;
+            return true;
         }
 
+        boolean ret = true;
         final File appVerFile = new File(appDir, "VERSION");
         if (appVerFile.exists()) {
             try {
