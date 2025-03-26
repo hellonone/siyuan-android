@@ -56,6 +56,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.blankj.utilcode.util.AppUtils;
+import com.blankj.utilcode.util.BarUtils;
 import com.blankj.utilcode.util.KeyboardUtils;
 import com.blankj.utilcode.util.StringUtils;
 import com.koushikdutta.async.AsyncServer;
@@ -89,22 +90,24 @@ import mobile.Mobile;
  * 主程序.
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
- * @version 1.1.0.6, Jan 3, 2025
+ * @version 1.1.1.2, Mar 20, 2025
  * @since 1.0.0
  */
 public class MainActivity extends AppCompatActivity implements com.blankj.utilcode.util.Utils.OnAppStatusChangedListener {
 
     private AsyncHttpServer server;
-    private int serverPort = 6906;
     private WebView webView;
     private ImageView bootLogo;
     private ProgressBar bootProgressBar;
     private TextView bootDetailsText;
-    private String webViewVer;
-    private String userAgent;
+
     private ValueCallback<Uri[]> uploadMessage;
     private static final int REQUEST_SELECT_FILE = 100;
     private static final int REQUEST_CAMERA = 101;
+
+    static int serverPort = 6906;
+    static String webViewVer;
+    static String userAgent;
 
     @Override
     public void onNewIntent(final Intent intent) {
@@ -119,7 +122,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
-        Log.i("boot", "create main activity");
+        Log.i("boot", "Create main activity");
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
@@ -147,9 +150,15 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         // Fix https://github.com/siyuan-note/siyuan/issues/9765
         Utils.registerSoftKeyboardToolbar(this, webView);
 
-        // 沉浸式状态栏设置
-        UltimateBarX.statusBarOnly(this).transparent().light(false).color(Color.parseColor("#1e1e1e")).apply();
-        ((ViewGroup) webView.getParent()).setPadding(0, UltimateBarX.getStatusBarHeight(), 0, 0);
+        if (Utils.isTablet(userAgent)) {
+            // 平板上隐藏状态栏 Hide the status bar on tablet https://github.com/siyuan-note/siyuan/issues/12204
+            BarUtils.setStatusBarVisibility(this, false);
+            Log.i("boot", "Hide status bar on tablet");
+        } else {
+            // 沉浸式状态栏设置
+            UltimateBarX.statusBarOnly(this).transparent().light(false).color(Color.parseColor("#1e1e1e")).apply();
+            ((ViewGroup) webView.getParent()).setPadding(0, UltimateBarX.getStatusBarHeight(), 0, 0);
+        }
 
         // Fix https://github.com/siyuan-note/siyuan/issues/9726
         // KeyboardUtils.fixAndroidBug5497(this);
@@ -178,7 +187,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
                         uploadMessage = null;
                         return false;
                     }
-                    
+
                     if (ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                         AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
                         builder.setTitle("权限申请 / Permission Request");
@@ -224,6 +233,12 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
 
         });
 
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
+            final Uri uri = Uri.parse(url);
+            final Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+            startActivity(intent);
+        });
+
         webView.setOnDragListener((v, event) -> {
             // 禁用拖拽 https://github.com/siyuan-note/siyuan/issues/6436
             return DragEvent.ACTION_DRAG_ENDED != event.getAction();
@@ -232,6 +247,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         final WebSettings ws = webView.getSettings();
         checkWebViewVer(ws);
         userAgent = ws.getUserAgentString();
+        Log.i("boot", "User agent [" + userAgent + "]");
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -279,9 +295,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        }
+        ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         ws.setTextZoom(100);
         ws.setUseWideViewPort(true);
         ws.setLoadWithOverviewMode(true);
@@ -345,7 +359,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
                 data.put("files", files);
                 final JSONObject responseJSON = new JSONObject().put("code", 0).put("msg", "").put("data", data);
                 response.send(responseJSON);
-                Utils.LogInfo("http", "walk dir [" + dir + "] in [" + (System.currentTimeMillis() - start) + "] ms");
+                Utils.LogInfo("http", "Walk dir [" + dir + "] in [" + (System.currentTimeMillis() - start) + "] ms");
             } catch (final Exception e) {
                 Utils.LogError("http", "walk dir failed", e);
                 try {
@@ -389,10 +403,9 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
     }
 
     private void bootKernel() {
-        Mobile.setHttpServerPort(serverPort);
+        Mobile.setHttpServerPort(MainActivity.serverPort);
         if (Mobile.isHttpServing()) {
-            Utils.LogInfo("boot", "kernel HTTP server is running");
-            showBootIndex();
+            Log.i("kernel", "Kernel HTTP server is running");
             return;
         }
 
@@ -405,7 +418,6 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         final String timezone = TimeZone.getDefault().getID();
         new Thread(() -> {
             final String localIPs = Utils.getIPAddressList();
-
             String langCode;
             if ("zh".equals(language)) {
                 // 检查是否为简体字脚本
@@ -428,14 +440,21 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
             } else {
                 // 对于非中文语言，创建一个映射来定义其他语言代码的对应关系
                 Map<String, String> otherLangMap = new HashMap<>();
-                otherLangMap.put("es", "es_ES"); // 西班牙语使用 es_ES
-                otherLangMap.put("fr", "fr_FR"); // 法语使用 fr_FR
+                otherLangMap.put("ar", "ar_SA");
+                otherLangMap.put("de", "de_DE");
+                otherLangMap.put("es", "es_ES");
+                otherLangMap.put("fr", "fr_FR");
+                otherLangMap.put("he", "he_IL");
+                otherLangMap.put("it", "it_IT");
+                otherLangMap.put("ja", "ja_JP");
+                otherLangMap.put("pl", "pl_PL");
+                otherLangMap.put("ru", "ru_RU");
 
                 // 使用 getOrDefault 方法从映射中获取语言代码，如果语言不存在则默认为 en_US
                 langCode = otherLangMap.getOrDefault(language, "en_US");
             }
 
-            if (Utils.isCnChannel(this)) {
+            if (Utils.isCnChannel(this.getPackageManager())) {
                 // Apps in Chinese mainland app stores no longer provide AI access settings https://github.com/siyuan-note/siyuan/issues/13051
                 Mobile.disableFeature("ai");
             }
@@ -633,7 +652,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         appDirFile.mkdirs();
 
         if (Utils.isDebugPackageAndMode(this)) {
-            Log.i("boot", "always unzip assets in debug mode");
+            Log.i("boot", "Always unzip assets in debug mode");
             return true;
         }
 
@@ -652,7 +671,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
 
     @Override
     protected void onDestroy() {
-        Log.i("boot", "destroy main activity");
+        Log.i("boot", "Destroy main activity");
         super.onDestroy();
         KeyboardUtils.unregisterSoftInputChangedListener(getWindow());
         AppUtils.unregisterAppStatusChangedListener(this);
@@ -722,7 +741,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
     public static void syncData() {
         try {
             if (syncing) {
-                Log.i("sync", "data is syncing...");
+                Log.i("sync", "Data is syncing...");
                 return;
             }
             syncing = true;

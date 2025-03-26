@@ -19,9 +19,11 @@ package org.b3log.siyuan;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
+import android.net.Uri;
 import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.WebView;
@@ -54,7 +56,7 @@ import mobile.Mobile;
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
  * @author <a href="https://github.com/wwxiaoqi">Jane Haring</a>
- * @version 1.2.0.1, Nov 6, 2024
+ * @version 1.3.0.0, Mar 5, 2025
  * @since 1.0.0
  */
 public final class Utils {
@@ -64,19 +66,28 @@ public final class Utils {
      */
     public static final String version = BuildConfig.VERSION_NAME;
 
-    private static long lastShowKeyboard = 0;
+    public static boolean isTablet(String userAgent) {
+        if (StringUtils.isEmpty(userAgent)) {
+            return false;
+        }
 
-    public static boolean isCnChannel(final Activity activity) {
-        final String channel = getChannel(activity);
+        userAgent = userAgent.toLowerCase();
+        return userAgent.contains("tablet") || userAgent.contains("pad") ||
+                (userAgent.contains("android") && !userAgent.contains("mobile"));
+    }
+
+
+    public static boolean isCnChannel(final PackageManager pm) {
+        final String channel = getChannel(pm);
         return channel.contains("cn") || channel.equals("huawei");
     }
 
-    public static String getChannel(final Activity activity) {
+    public static String getChannel(final PackageManager pm) {
         // Privacy policy solicitation will no longer pop up when Android starts for the first time
         // https://github.com/siyuan-note/siyuan/issues/10348
         ApplicationInfo applicationInfo;
         try {
-            applicationInfo = activity.getPackageManager().getApplicationInfo(activity.getPackageName(), PackageManager.GET_META_DATA);
+            applicationInfo = pm.getApplicationInfo(BuildConfig.APPLICATION_ID, PackageManager.GET_META_DATA);
         } catch (PackageManager.NameNotFoundException e) {
             throw new RuntimeException(e);
         }
@@ -85,21 +96,26 @@ public final class Utils {
         return applicationInfo.metaData.getString("CHANNEL");
     }
 
+
+    private static long lastShowKeyboard = 0;
+
     public static void registerSoftKeyboardToolbar(final Activity activity, final WebView webView) {
         KeyboardUtils.registerSoftInputChangedListener(activity, height -> {
-            if (!activity.isInMultiWindowMode()) {
-                final long now = System.currentTimeMillis();
-                if (KeyboardUtils.isSoftInputVisible(activity)) {
-                    webView.evaluateJavascript("javascript:showKeyboardToolbar()", null);
-                    lastShowKeyboard = now;
-                } else {
-                    if (now - lastShowKeyboard < 500) {
-                        // 短时间内键盘显示又隐藏，强制再次显示键盘 https://github.com/siyuan-note/siyuan/issues/11098#issuecomment-2273704439
-                        KeyboardUtils.showSoftInput(activity);
-                        return;
-                    }
-                    webView.evaluateJavascript("javascript:hideKeyboardToolbar()", null);
+            if (activity.isInMultiWindowMode()) {
+                return;
+            }
+
+            final long now = System.currentTimeMillis();
+            if (KeyboardUtils.isSoftInputVisible(activity)) {
+                webView.evaluateJavascript("javascript:showKeyboardToolbar()", null);
+                lastShowKeyboard = now;
+            } else {
+                if (now - lastShowKeyboard < 500) {
+                    // 短时间内键盘显示又隐藏，强制再次显示键盘 https://github.com/siyuan-note/siyuan/issues/11098#issuecomment-2273704439
+                    KeyboardUtils.showSoftInput(activity);
+                    return;
                 }
+                webView.evaluateJavascript("javascript:hideKeyboardToolbar()", null);
             }
         });
     }
@@ -270,5 +286,29 @@ public final class Utils {
         } catch (final Exception e) {
             return false;
         }
+    }
+
+    public static void openByDefaultBrowser(String url, final Activity activity) {
+        if (StringUtils.isEmpty(url)) {
+            return;
+        }
+
+        if (url.startsWith("#")) {
+            return;
+        }
+
+        if (url.startsWith("/")) {
+            url = "http://127.0.0.1:6806" + url;
+        }
+
+        if (url.startsWith("assets/")) {
+            url = "http://127.0.0.1:6806/" + url;
+        }
+
+        // https://developer.android.google.cn/training/app-links/verify-android-applinks?hl=zh-cn
+        // 从 Android 12 开始，经过验证的链接现在会自动在相应的应用中打开，以获得更简化、更快速的用户体验。谷歌还更改了未经Android应用链接验证或用户手动批准的链接的默认处理方式。谷歌表示，Android 12将始终在默认浏览器中打开此类未经验证的链接，而不是向您显示应用程序选择对话框。
+        final Uri uri = Uri.parse(url);
+        final Intent browserIntent = new Intent(Intent.ACTION_VIEW, uri);
+        activity.startActivity(browserIntent);
     }
 }

@@ -31,13 +31,21 @@ import android.os.IBinder;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
 
+import org.apache.commons.io.FileUtils;
+
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
+
+import mobile.Mobile;
 
 /**
  * 保活服务.
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
- * @version 1.0.1.2, Feb 7, 2024
+ * @version 1.0.2.1, Mar 14, 2025
  * @since 1.0.0
  */
 public class KeepLiveService extends Service {
@@ -51,13 +59,69 @@ public class KeepLiveService extends Service {
     public void onCreate() {
         try {
             super.onCreate();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startMyOwnForeground();
-            } else {
-                startForeground(1, new Notification());
-            }
+            startMyOwnForeground();
         } catch (final Throwable e) {
             Utils.LogError("keeplive", "Start foreground service failed", e);
+        }
+    }
+
+    private Random random = new Random();
+
+    private void startMyOwnForeground() {
+        final Intent resultIntent = new Intent(this, MainActivity.class).
+                setAction(Intent.ACTION_MAIN).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent resultPendingIntent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 端部分系统闪退 https://github.com/siyuan-note/siyuan/issues/7188
+            resultPendingIntent = PendingIntent.getActivity(this, 0, resultIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+        } else {
+            resultPendingIntent = PendingIntent.getActivity(this, 0, resultIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        }
+
+        final String NOTIFICATION_CHANNEL_ID = BuildConfig.APPLICATION_ID;
+        final String channelName = "SiYuan Kernel Service";
+        final NotificationChannel chan = new NotificationChannel(NOTIFICATION_CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_NONE);
+        chan.setLightColor(Color.BLUE);
+        chan.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        final NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        manager.createNotificationChannel(chan);
+        final NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID);
+        final String[] texts = getNotificationTexts();
+        final Notification notification = notificationBuilder.setOngoing(true).
+                setSmallIcon(R.drawable.icon).
+                setContentTitle(texts[random.nextInt(texts.length)]).
+                setPriority(NotificationManager.IMPORTANCE_MIN).
+                setCategory(Notification.CATEGORY_SERVICE).
+                setContentIntent(resultPendingIntent).
+                build();
+        startForeground(2, notification);
+    }
+
+    private String[] getNotificationTexts() {
+        final String workspacePath = Mobile.getCurrentWorkspacePath();
+        final String notificationTxtPath = workspacePath + "/data/assets/android-notification-texts.txt";
+        try {
+            final File notificationTxtFile = new File(notificationTxtPath);
+            if (!notificationTxtFile.exists()) {
+                return words;
+            }
+
+            final List<String> tmp = FileUtils.readLines(notificationTxtFile, StandardCharsets.UTF_8);
+            final List<String> lines = new ArrayList<>();
+            for (final String line : tmp) {
+                if (line.trim().isEmpty()) {
+                    continue;
+                }
+                lines.add(line);
+            }
+            if (lines.isEmpty()) {
+                return words;
+            }
+
+            final String[] ret = new String[lines.size()];
+            return lines.toArray(ret);
+        } catch (final Exception e) {
+            Utils.LogError("boot", "check version failed", e);
+            return words;
         }
     }
 
@@ -77,36 +141,5 @@ public class KeepLiveService extends Service {
             "荣耀的背后刻着一道孤独",
             "动机也只有一种名字那叫做欲望",
     };
-
-    private Random random = new Random();
-
-    @RequiresApi(api = Build.VERSION_CODES.O)
-    private void startMyOwnForeground() {
-        final Intent resultIntent = new Intent(this, MainActivity.class).
-                setAction(Intent.ACTION_MAIN).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent resultPendingIntent;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 端部分系统闪退 https://github.com/siyuan-note/siyuan/issues/7188
-            resultPendingIntent = PendingIntent.getActivity(this, 0, resultIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
-        } else {
-            resultPendingIntent = PendingIntent.getActivity(this, 0, resultIntent, PendingIntent.FLAG_UPDATE_CURRENT);
-        }
-
-        final String NOTIFICATION_CHANNEL_ID = BuildConfig.APPLICATION_ID;
-        final String channelName = "SiYuan Kernel Service";
-        final NotificationChannel chan = new NotificationChannel(NOTIFICATION_CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_NONE);
-        chan.setLightColor(Color.BLUE);
-        chan.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
-        final NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        manager.createNotificationChannel(chan);
-        final NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID);
-        final Notification notification = notificationBuilder.setOngoing(true).
-                setSmallIcon(R.drawable.icon).
-                setContentTitle(words[random.nextInt(words.length)]).
-                setPriority(NotificationManager.IMPORTANCE_MIN).
-                setCategory(Notification.CATEGORY_SERVICE).
-                setContentIntent(resultPendingIntent).
-                build();
-        startForeground(2, notification);
-    }
 }
 
