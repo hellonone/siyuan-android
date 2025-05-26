@@ -31,6 +31,8 @@ import android.text.Html;
 import android.text.method.LinkMovementMethod;
 import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
+import android.view.View;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -87,7 +89,7 @@ public class BootActivity extends AppCompatActivity {
                 blockURL = blockURLUri.toString();
             }
         } catch (final Exception e) {
-            Utils.LogError("boot", "gets block URL failed", e);
+            Utils.logError("boot", "gets block URL failed", e);
         }
 
         // 获取可能存在的分享数据
@@ -112,11 +114,6 @@ public class BootActivity extends AppCompatActivity {
                     final ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                     clipboard.setPrimaryClip(ClipData.newHtmlText("Copied text from shared", text, text));
                 }
-            } else if (type.startsWith("image/") || type.startsWith("video/") || type.startsWith("audio/") || type.startsWith("application/")) {
-                final Uri assetUri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
-                if (assetUri != null) {
-                    Log.i("boot", "Received shared asset [" + assetUri + "]");
-                }
             }
         }
 
@@ -133,6 +130,8 @@ public class BootActivity extends AppCompatActivity {
             final String cmd = msg.getData().getString("cmd");
             if ("agreement-y".equals(cmd)) {
                 agreementDialog.dismiss();
+                final ProgressBar progressBar = findViewById(R.id.progressBar);
+                runOnUiThread(() -> progressBar.setVisibility(View.VISIBLE));
                 startMainActivity();
             } else if ("agreement-n".equals(cmd)) {
                 final String dataDir = getFilesDir().getAbsolutePath();
@@ -141,14 +140,14 @@ public class BootActivity extends AppCompatActivity {
                 try {
                     FileUtils.deleteQuietly(appDirFile);
                 } catch (final Exception e) {
-                    Utils.LogError("boot", "delete [" + appDirFile.getAbsolutePath() + "] failed", e);
+                    Utils.logError("boot", "delete [" + appDirFile.getAbsolutePath() + "] failed", e);
                 }
 
                 finishAffinity();
                 finishAndRemoveTask();
                 Log.i("boot", "User did not accept the agreement, exit");
             } else {
-                Utils.LogError("boot", "unknown agreement command [" + cmd + "]", null);
+                Utils.logError("boot", "unknown agreement command [" + cmd + "]");
             }
         }
     };

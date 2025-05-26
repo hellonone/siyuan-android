@@ -38,6 +38,7 @@ import android.util.Log;
 import android.view.DragEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -46,10 +47,10 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -90,7 +91,7 @@ import mobile.Mobile;
  * 主程序.
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
- * @version 1.1.1.2, Mar 20, 2025
+ * @version 1.1.1.7, May 23, 2025
  * @since 1.0.0
  */
 public class MainActivity extends AppCompatActivity implements com.blankj.utilcode.util.Utils.OnAppStatusChangedListener {
@@ -127,6 +128,11 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // Full screen display in landscape mode on Android https://github.com/siyuan-note/siyuan/issues/14448
+            getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+
         // 启动 HTTP Server
         startHttpServer();
 
@@ -153,6 +159,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         if (Utils.isTablet(userAgent)) {
             // 平板上隐藏状态栏 Hide the status bar on tablet https://github.com/siyuan-note/siyuan/issues/12204
             BarUtils.setStatusBarVisibility(this, false);
+            BarUtils.setNavBarVisibility(this, false);
             Log.i("boot", "Hide status bar on tablet");
         } else {
             // 沉浸式状态栏设置
@@ -171,67 +178,6 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         bootDetailsText = findViewById(R.id.bootDetails);
         webView = findViewById(R.id.webView);
         webView.setBackgroundColor(Color.parseColor("#1e1e1e"));
-        webView.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public boolean onShowFileChooser(final WebView mWebView, final ValueCallback<Uri[]> filePathCallback, final FileChooserParams fileChooserParams) {
-                if (uploadMessage != null) {
-                    uploadMessage.onReceiveValue(null);
-                }
-
-                uploadMessage = filePathCallback;
-
-                if (fileChooserParams.isCaptureEnabled()) {
-                    if (Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
-                        // 不支持 Android 10 以下
-                        Toast.makeText(getApplicationContext(), "Capture is not supported on your device (Android 10+ required)", Toast.LENGTH_LONG).show();
-                        uploadMessage = null;
-                        return false;
-                    }
-
-                    if (ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-                        AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
-                        builder.setTitle("权限申请 / Permission Request");
-                        builder.setMessage("需要相机权限以拍摄照片并插入到当前文档中 / Camera permission is required to take photos and insert them into the current document");
-                        builder.setPositiveButton("同意/Agree", (dialog, which) -> {
-                            ActivityCompat.requestPermissions(MainActivity.this, new String[]{android.Manifest.permission.CAMERA}, REQUEST_CAMERA);
-                        });
-                        builder.setNegativeButton("拒绝/Decline", (dialog, which) -> {
-                            Toast.makeText(MainActivity.this, "权限已被拒绝 / Permission denied", Toast.LENGTH_LONG).show();
-                            uploadMessage = null;
-                        });
-                        builder.setCancelable(false);
-                        builder.create().show();
-                        return true;
-                    }
-
-                    final String[] permissions = {android.Manifest.permission.CAMERA};
-                    if (!hasPermissions(permissions)) {
-                        ActivityCompat.requestPermissions(MainActivity.this, permissions, REQUEST_CAMERA);
-                        return true;
-                    }
-
-                    openCamera();
-                    return true;
-                }
-
-                final Intent intent = fileChooserParams.createIntent();
-                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                try {
-                    startActivityForResult(intent, REQUEST_SELECT_FILE);
-                } catch (final Exception e) {
-                    uploadMessage = null;
-                    Toast.makeText(getApplicationContext(), "Cannot open file chooser", Toast.LENGTH_LONG).show();
-                    return false;
-                }
-                return true;
-            }
-
-            @Override
-            public void onPermissionRequest(final PermissionRequest request) {
-                request.grant(request.getResources());
-            }
-
-        });
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
             final Uri uri = Uri.parse(url);
@@ -252,6 +198,10 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
 
     @SuppressLint("SetJavaScriptEnabled")
     private void showBootIndex() {
+        if (null == webView) {
+            return;
+        }
+
         webView.setVisibility(View.VISIBLE);
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -278,13 +228,107 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                new Handler().postDelayed(() -> {
+                runOnUiThread(() -> {
                     bootLogo.setVisibility(View.GONE);
                     bootProgressBar.setVisibility(View.GONE);
                     bootDetailsText.setVisibility(View.GONE);
-                    final ImageView bootLogo = findViewById(R.id.bootLogo);
-                    bootLogo.setVisibility(View.GONE);
-                }, 666);
+                });
+            }
+        });
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            private View mCustomView;
+            private WebChromeClient.CustomViewCallback mCustomViewCallback;
+            private int mOriginalSystemUiVisibility;
+
+            @Override
+            public void onShowCustomView(final View view, final WebChromeClient.CustomViewCallback callback) {
+                if (mCustomView != null) {
+                    callback.onCustomViewHidden();
+                    return;
+                }
+
+                mCustomView = view;
+                mOriginalSystemUiVisibility = getWindow().getDecorView().getSystemUiVisibility();
+                mCustomViewCallback = callback;
+
+                final FrameLayout decor = (FrameLayout) getWindow().getDecorView();
+                decor.addView(mCustomView, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT));
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_FULLSCREEN |
+                                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+                                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);
+            }
+
+            @Override
+            public void onHideCustomView() {
+                final FrameLayout decor = (FrameLayout) getWindow().getDecorView();
+                decor.removeView(mCustomView);
+                mCustomView = null;
+                getWindow().getDecorView().setSystemUiVisibility(mOriginalSystemUiVisibility);
+                mCustomViewCallback.onCustomViewHidden();
+                mCustomViewCallback = null;
+            }
+
+            @Override
+            public boolean onShowFileChooser(final WebView mWebView, final ValueCallback<Uri[]> filePathCallback, final FileChooserParams fileChooserParams) {
+                if (uploadMessage != null) {
+                    uploadMessage.onReceiveValue(null);
+                }
+
+                uploadMessage = filePathCallback;
+
+                if (fileChooserParams.isCaptureEnabled()) {
+                    if (Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+                        // 不支持 Android 10 以下
+                        Utils.showToast(MainActivity.this, "Capture is not supported on your device (Android 10+ required)");
+                        uploadMessage = null;
+                        return false;
+                    }
+
+                    if (ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                        AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                        builder.setTitle("权限申请 / Permission Request");
+                        builder.setMessage("需要相机权限以拍摄照片并插入到当前文档中 / Camera permission is required to take photos and insert them into the current document");
+                        builder.setPositiveButton("同意/Agree", (dialog, which) -> {
+                            ActivityCompat.requestPermissions(MainActivity.this, new String[]{android.Manifest.permission.CAMERA}, REQUEST_CAMERA);
+                        });
+                        builder.setNegativeButton("拒绝/Decline", (dialog, which) -> {
+                            Utils.showToast(MainActivity.this, "权限已被拒绝 / Permission denied");
+                            uploadMessage = null;
+                        });
+                        builder.setCancelable(false);
+                        builder.create().show();
+                        return true;
+                    }
+
+                    final String[] permissions = {};
+                    if (ContextCompat.checkSelfPermission(MainActivity.this, android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                        ActivityCompat.requestPermissions(MainActivity.this, permissions, REQUEST_CAMERA);
+                        return true;
+                    }
+
+                    openCamera();
+                    return true;
+                }
+
+                final Intent intent = fileChooserParams.createIntent();
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                try {
+                    startActivityForResult(intent, REQUEST_SELECT_FILE);
+                } catch (final Exception e) {
+                    uploadMessage = null;
+                    Utils.showToast(MainActivity.this, "Cannot open file chooser");
+                    return false;
+                }
+                return true;
+            }
+
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                request.grant(request.getResources());
             }
         });
 
@@ -331,7 +375,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
             usAscii.setAccessible(true);
             usAscii.set(Charsets.class, Charsets.UTF_8);
         } catch (final Exception e) {
-            Utils.LogError("http", "init charset failed", e);
+            Utils.logError("http", "init charset failed", e);
         }
 
         server = new AsyncHttpServer();
@@ -352,20 +396,20 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
                         info.put("updated", file.lastModified());
                         info.put("isDir", file.isDirectory());
                     } catch (final Exception e) {
-                        Utils.LogError("http", "walk dir failed", e);
+                        Utils.logError("http", "walk dir failed", e);
                     }
                     files.put(info);
                 });
                 data.put("files", files);
                 final JSONObject responseJSON = new JSONObject().put("code", 0).put("msg", "").put("data", data);
                 response.send(responseJSON);
-                Utils.LogInfo("http", "Walk dir [" + dir + "] in [" + (System.currentTimeMillis() - start) + "] ms");
+                Utils.logInfo("http", "Walk dir [" + dir + "] in [" + (System.currentTimeMillis() - start) + "] ms");
             } catch (final Exception e) {
-                Utils.LogError("http", "walk dir failed", e);
+                Utils.logError("http", "walk dir failed", e);
                 try {
                     response.send(new JSONObject().put("code", -1).put("msg", e.getMessage()));
                 } catch (final Exception e2) {
-                    Utils.LogError("http", "walk dir failed", e2);
+                    Utils.logError("http", "walk dir failed", e2);
                 }
             }
         });
@@ -379,7 +423,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
             // 生产环境绑定 ipv6 回环地址 [::1] 以防止被远程访问
             s.listen(InetAddress.getLoopbackAddress(), serverPort, server.getListenCallback());
         }
-        Utils.LogInfo("http", "HTTP server is listening on port [" + serverPort + "]");
+        Utils.logInfo("http", "HTTP server is listening on port [" + serverPort + "]");
     }
 
     private int getAvailablePort() {
@@ -389,9 +433,64 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
             ret = s.getLocalPort();
             s.close();
         } catch (final Exception e) {
-            Utils.LogError("http", "get available port failed", e);
+            Utils.logError("http", "get available port failed", e);
         }
         return ret;
+    }
+
+    private void bootKernel() {
+        Mobile.setHttpServerPort(MainActivity.serverPort);
+        if (Mobile.isHttpServing()) {
+            Log.i("kernel", "Kernel HTTP server is running");
+            bootIndex();
+            return;
+        }
+
+        new Thread(() -> {
+            if (Utils.isCnChannel(this.getPackageManager())) {
+                // Apps in Chinese mainland app stores no longer provide AI access settings https://github.com/siyuan-note/siyuan/issues/13051
+                Mobile.disableFeature("ai");
+            }
+
+            final String appDir = getFilesDir().getAbsolutePath() + "/app";
+            final String workspaceBaseDir = getExternalFilesDir(null).getAbsolutePath();
+            final String timezone = TimeZone.getDefault().getID();
+            final String localIPs = Utils.getIPAddressList();
+            final String langCode = Utils.getLanguage();
+            Mobile.startKernel("android", appDir, workspaceBaseDir, timezone, localIPs, langCode,
+                    Build.VERSION.RELEASE +
+                            "/SDK " + Build.VERSION.SDK_INT +
+                            "/WebView " + webViewVer +
+                            "/Manufacturer " + android.os.Build.MANUFACTURER +
+                            "/Brand " + android.os.Build.BRAND +
+                            "/UA " + userAgent);
+        }).start();
+
+        bootIndex();
+    }
+
+    /**
+     * 通知栏保活。
+     */
+    private void keepLive() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+        }
+
+        while (true) {
+            try {
+                final Intent intent = new Intent(MainActivity.this, KeepLiveService.class);
+                ContextCompat.startForegroundService(this, intent);
+                sleep(45 * 1000);
+                stopService(intent);
+            } catch (final Throwable t) {
+                Utils.logError("keeplive", "keep live failed", t);
+                break;
+            }
+        }
     }
 
     private void startKernel() {
@@ -402,92 +501,12 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         bootHandler.sendMessage(msg);
     }
 
-    private void bootKernel() {
-        Mobile.setHttpServerPort(MainActivity.serverPort);
-        if (Mobile.isHttpServing()) {
-            Log.i("kernel", "Kernel HTTP server is running");
-            return;
-        }
-
-        final String appDir = getFilesDir().getAbsolutePath() + "/app";
-        final Locale locale = LocaleList.getDefault().get(0); // 获取用户的设备首选语言
-        final String language = locale.getLanguage().toLowerCase(); // 获取语言代码
-        final String script = locale.getScript().toLowerCase(); // 获取脚本代码
-        final String country = locale.getCountry().toLowerCase(); // 获取国家代码
-        final String workspaceBaseDir = getExternalFilesDir(null).getAbsolutePath();
-        final String timezone = TimeZone.getDefault().getID();
-        new Thread(() -> {
-            final String localIPs = Utils.getIPAddressList();
-            String langCode;
-            if ("zh".equals(language)) {
-                // 检查是否为简体字脚本
-                if ("hans".equals(script)) {
-                    langCode = "zh_CN"; // 简体中文，使用 zh_CN
-
-                } else if ("hant".equals(script)) {
-                    // 对于繁体字脚本，需要进一步检查国家代码
-                    if ("tw".equals(country)) {
-                        langCode = "zh_CHT"; // 繁体中文对应台湾
-                    } else if ("hk".equals(country)) {
-                        langCode = "zh_CHT"; // 繁体中文对应香港
-                    } else {
-                        langCode = "zh_CHT"; // 其他繁体中文情况也使用 zh_CHT
-                    }
-                } else {
-                    langCode = "zh_CN"; // 如果脚本不是简体或繁体，默认为简体中文
-                }
-
-            } else {
-                // 对于非中文语言，创建一个映射来定义其他语言代码的对应关系
-                Map<String, String> otherLangMap = new HashMap<>();
-                otherLangMap.put("ar", "ar_SA");
-                otherLangMap.put("de", "de_DE");
-                otherLangMap.put("es", "es_ES");
-                otherLangMap.put("fr", "fr_FR");
-                otherLangMap.put("he", "he_IL");
-                otherLangMap.put("it", "it_IT");
-                otherLangMap.put("ja", "ja_JP");
-                otherLangMap.put("pl", "pl_PL");
-                otherLangMap.put("ru", "ru_RU");
-
-                // 使用 getOrDefault 方法从映射中获取语言代码，如果语言不存在则默认为 en_US
-                langCode = otherLangMap.getOrDefault(language, "en_US");
-            }
-
-            if (Utils.isCnChannel(this.getPackageManager())) {
-                // Apps in Chinese mainland app stores no longer provide AI access settings https://github.com/siyuan-note/siyuan/issues/13051
-                Mobile.disableFeature("ai");
-            }
-
-            Mobile.startKernel("android", appDir, workspaceBaseDir, timezone, localIPs, langCode,
-                    Build.VERSION.RELEASE +
-                            "/SDK " + Build.VERSION.SDK_INT +
-                            "/WebView " + webViewVer +
-                            "/Manufacturer " + android.os.Build.MANUFACTURER +
-                            "/Brand " + android.os.Build.BRAND +
-                            "/UA " + userAgent);
-        }).start();
-
+    private void bootIndex() {
         final Bundle b = new Bundle();
         b.putString("cmd", "bootIndex");
         final Message msg = new Message();
         msg.setData(b);
         bootHandler.sendMessage(msg);
-    }
-
-    /**
-     * 通知栏保活。
-     */
-    private void keepLive() {
-        while (true) {
-            try {
-                final Intent intent = new Intent(MainActivity.this, KeepLiveService.class);
-                ContextCompat.startForegroundService(this, intent);
-                sleep(45 * 1000);
-                stopService(intent);
-            } catch (final Throwable t) {
-            }
-        }
     }
 
     /**
@@ -504,8 +523,6 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
 
     private void initAppearance() {
         if (needUnzipAssets()) {
-            bootLogo.setVisibility(View.VISIBLE);
-
             final String appDir = getFilesDir().getAbsolutePath() + "/app";
             final File appVerFile = new File(appDir, "VERSION");
 
@@ -513,7 +530,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
             try {
                 FileUtils.deleteDirectory(new File(appDir));
             } catch (final Exception e) {
-                Utils.LogError("boot", "delete dir [" + appDir + "] failed, exit application", e);
+                Utils.logError("boot", "delete dir [" + appDir + "] failed, exit application", e);
                 exit();
                 return;
             }
@@ -522,9 +539,9 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
             Utils.unzipAsset(getAssets(), "app.zip", appDir + "/app");
 
             try {
-                FileUtils.writeStringToFile(appVerFile, Utils.version, StandardCharsets.UTF_8);
+                FileUtils.writeStringToFile(appVerFile, Utils.versionCode + "", StandardCharsets.UTF_8);
             } catch (final Exception e) {
-                Utils.LogError("boot", "write version failed", e);
+                Utils.logError("boot", "write version failed", e);
             }
 
             setBootProgress("Booting kernel...", 80);
@@ -542,7 +559,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         try {
             Thread.sleep(time);
         } catch (final Exception e) {
-            Utils.LogError("runtime", "sleep failed", e);
+            Utils.logError("runtime", "sleep failed", e);
         }
     }
 
@@ -554,15 +571,6 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
     // 用于保存拍照图片的 uri
     private Uri mCameraUri;
 
-    private boolean hasPermissions(String[] permissions) {
-        for (String permission : permissions) {
-            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         if (requestCode == REQUEST_CAMERA) {
@@ -571,7 +579,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
                 return;
             }
 
-            Toast.makeText(this, "权限已被拒绝 / Permission denied", Toast.LENGTH_LONG).show();
+            Utils.showToast(this, "权限已被拒绝 / Permission denied");
         }
 
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -656,15 +664,25 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
             return true;
         }
 
-        boolean ret = true;
         final File appVerFile = new File(appDir, "VERSION");
-        if (appVerFile.exists()) {
-            try {
-                final String ver = FileUtils.readFileToString(appVerFile, StandardCharsets.UTF_8);
-                ret = !ver.equals(Utils.version);
-            } catch (final Exception e) {
-                Utils.LogError("boot", "check version failed", e);
+        if (!appVerFile.exists()) {
+            return true;
+        }
+
+        boolean ret = true;
+        try {
+            String ver = FileUtils.readFileToString(appVerFile, StandardCharsets.UTF_8);
+            if (StringUtils.isEmpty(ver)) {
+                return true;
             }
+            ver = ver.trim();
+            try {
+                return Integer.parseInt(ver) != Utils.versionCode;
+            } catch (final NumberFormatException e) {
+                return true;
+            }
+        } catch (final Exception e) {
+            Utils.logError("boot", "check version failed", e);
         }
         return ret;
     }
@@ -673,15 +691,7 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
     protected void onDestroy() {
         Log.i("boot", "Destroy main activity");
         super.onDestroy();
-        KeyboardUtils.unregisterSoftInputChangedListener(getWindow());
-        AppUtils.unregisterAppStatusChangedListener(this);
-        if (null != webView) {
-            webView.removeAllViews();
-            webView.destroy();
-        }
-        if (null != server) {
-            server.stop();
-        }
+        release();
     }
 
     @Override
@@ -703,8 +713,21 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
     }
 
     private void exit() {
+        release();
         finishAffinity();
         finishAndRemoveTask();
+    }
+
+    private void release() {
+        KeyboardUtils.unregisterSoftInputChangedListener(getWindow());
+        AppUtils.unregisterAppStatusChangedListener(this);
+        if (null != webView) {
+            ((ViewGroup) webView.getParent()).removeView(webView);
+            webView.removeAllViews();
+        }
+        if (null != server) {
+            server.stop();
+        }
     }
 
     private void checkWebViewVer(final WebSettings ws) {
@@ -718,12 +741,12 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
                     final String[] chromeVersionParts = chromeVersion.split("\\.");
                     webViewVer = chromeVersionParts[0];
                     if (Integer.parseInt(webViewVer) < minVer) {
-                        Toast.makeText(this, "WebView version [" + chromeVersion + "] is too low, please upgrade to " + minVer + "+", Toast.LENGTH_LONG).show();
+                        Utils.showToast(this, "WebView version [" + chromeVersion + "] is too low, please upgrade to ");
                     }
                 }
             } catch (final Exception e) {
-                Utils.LogError("boot", "check webview version failed", e);
-                Toast.makeText(this, "Check WebView version failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                Utils.logError("boot", "check webview version failed", e);
+                Utils.showToast(this, "Check WebView version failed: " + e.getMessage());
             }
         }
     }
@@ -753,12 +776,12 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
                         @Override
                         public void onCompleted(Exception e, com.koushikdutta.async.http.AsyncHttpResponse source, JSONObject result) {
                             if (null != e) {
-                                Utils.LogError("sync", "data sync failed", e);
+                                Utils.logError("sync", "data sync failed", e);
                             }
                         }
                     });
         } catch (final Throwable e) {
-            Utils.LogError("sync", "data sync failed", e);
+            Utils.logError("sync", "data sync failed", e);
         } finally {
             syncing = false;
         }

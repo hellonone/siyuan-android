@@ -28,7 +28,6 @@ import android.graphics.Color;
 import android.os.Build;
 import android.os.IBinder;
 
-import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
 
 import org.apache.commons.io.FileUtils;
@@ -45,7 +44,7 @@ import mobile.Mobile;
  * 保活服务.
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
- * @version 1.0.2.1, Mar 14, 2025
+ * @version 1.0.2.3, May 23, 2025
  * @since 1.0.0
  */
 public class KeepLiveService extends Service {
@@ -61,7 +60,7 @@ public class KeepLiveService extends Service {
             super.onCreate();
             startMyOwnForeground();
         } catch (final Throwable e) {
-            Utils.LogError("keeplive", "Start foreground service failed", e);
+            Utils.logError("keeplive", "start foreground service failed", e);
         }
     }
 
@@ -83,9 +82,16 @@ public class KeepLiveService extends Service {
         chan.setLightColor(Color.BLUE);
         chan.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
         final NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        manager.createNotificationChannel(chan);
+        if (null != manager) {
+            manager.createNotificationChannel(chan);
+        }
         final NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID);
         final String[] texts = getNotificationTexts();
+        if (null == texts || 1 > texts.length) {
+            Utils.logError("keeplive", "notification texts is empty");
+            return;
+        }
+
         final Notification notification = notificationBuilder.setOngoing(true).
                 setSmallIcon(R.drawable.icon).
                 setContentTitle(texts[random.nextInt(texts.length)]).
@@ -97,12 +103,12 @@ public class KeepLiveService extends Service {
     }
 
     private String[] getNotificationTexts() {
-        final String workspacePath = Mobile.getCurrentWorkspacePath();
-        final String notificationTxtPath = workspacePath + "/data/assets/android-notification-texts.txt";
         try {
+            final String workspacePath = Mobile.getCurrentWorkspacePath();
+            final String notificationTxtPath = workspacePath + "/data/assets/android-notification-texts.txt";
             final File notificationTxtFile = new File(notificationTxtPath);
             if (!notificationTxtFile.exists()) {
-                return words;
+                return getLyrics();
             }
 
             final List<String> tmp = FileUtils.readLines(notificationTxtFile, StandardCharsets.UTF_8);
@@ -114,18 +120,30 @@ public class KeepLiveService extends Service {
                 lines.add(line);
             }
             if (lines.isEmpty()) {
-                return words;
+                return getLyrics();
             }
 
             final String[] ret = new String[lines.size()];
             return lines.toArray(ret);
         } catch (final Exception e) {
-            Utils.LogError("boot", "check version failed", e);
-            return words;
+            Utils.logError("keeplive", "get notification texts failed", e);
+            return getLyrics();
         }
     }
 
-    private final String[] words = new String[]{
+    private String[] getLyrics() {
+        final String lang = Utils.getLanguage();
+        switch (lang) {
+            case "zh_CN":
+                return zhCNLyrics;
+            case "zh_CHT":
+                return zhCHTLyrics;
+            default:
+                return lyrics;
+        }
+    }
+
+    private final String[] lyrics = new String[]{
             "We are programmed to receive",
             "Then the piper will lead us to reason",
             "You're not the only one",
@@ -133,6 +151,10 @@ public class KeepLiveService extends Service {
             "We still can find a way",
             "You gotta make it your own way",
             "Everybody needs somebody",
+            "Now, there is a fire within me",
+    };
+
+    private final String[] zhCNLyrics = new String[]{
             "原谅我这一生不羁放纵爱自由",
             "我要再次找那旧日的足迹",
             "心中一股冲劲勇闯，抛开那现实没有顾虑",
@@ -140,6 +162,16 @@ public class KeepLiveService extends Service {
             "其实怕被忘记至放大来演吧",
             "荣耀的背后刻着一道孤独",
             "动机也只有一种名字那叫做欲望",
+    };
+
+    private final String[] zhCHTLyrics = new String[]{
+            "原諒我這一生不羈放縱愛自由",
+            "我要再次找那舊日的足跡",
+            "心中一股衝勁勇闖，拋開那現實沒有顧慮",
+            "願望是努力走向那一方",
+            "其實怕被忘記至放大來演吧",
+            "榮耀的背後刻著一道孤獨",
+            "動機也只有一種名字那叫做慾望",
     };
 }
 

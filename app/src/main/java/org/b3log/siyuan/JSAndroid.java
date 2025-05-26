@@ -30,6 +30,7 @@ import androidx.core.app.ShareCompat;
 import androidx.core.content.FileProvider;
 
 import com.blankj.utilcode.util.BarUtils;
+import com.blankj.utilcode.util.KeyboardUtils;
 import com.blankj.utilcode.util.StringUtils;
 import com.zackratos.ultimatebarx.ultimatebarx.java.UltimateBarX;
 
@@ -43,7 +44,7 @@ import mobile.Mobile;
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
  * @author <a href="https://github.com/Soltus">绛亽</a>
- * @version 1.2.2.0, Mar 23, 2025
+ * @version 1.2.3.0, Mar 12, 2025
  * @since 1.0.0
  */
 public final class JSAndroid {
@@ -51,6 +52,15 @@ public final class JSAndroid {
 
     public JSAndroid(final MainActivity activity) {
         this.activity = activity;
+    }
+
+    @JavascriptInterface
+    public void hideKeyboard() {
+        activity.runOnUiThread(() -> {
+            KeyboardUtils.hideSoftInput(activity);
+            Utils.lastFrontendForceHideKeyboard = System.currentTimeMillis();
+            //Utils.logInfo("keyboard", "Hide keyboard");
+        });
     }
 
     @JavascriptInterface
@@ -77,7 +87,7 @@ public final class JSAndroid {
             final Uri uri = item.getUri();
             final String url = uri.toString();
             if (url.startsWith("http://127.0.0.1:6806/assets/")) {
-                final int idx = url.indexOf("/assets/");
+                final int idx = url.indexOf("assets/");
                 final String asset = url.substring(idx);
                 String name = asset.substring(asset.lastIndexOf("/") + 1);
                 final int suffixIdx = name.lastIndexOf(".");
@@ -186,7 +196,7 @@ public final class JSAndroid {
                     .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             activity.startActivity(intent);
         } catch (Exception e) {
-            Utils.LogError("JSAndroid", "openExternal failed", e);
+            Utils.logError("JSAndroid", "openExternal failed", e);
         }
     }
 
@@ -227,7 +237,7 @@ public final class JSAndroid {
             }
             return Color.parseColor(str);
         } catch (final Exception e) {
-            Utils.LogError("js", "parse color failed", e);
+            Utils.logError("js", "parse color [" + str + "] failed", e);
             return Color.parseColor("#212224");
         }
     }

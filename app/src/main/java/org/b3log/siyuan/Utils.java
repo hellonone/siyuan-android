@@ -24,9 +24,13 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.net.Uri;
+import android.os.LocaleList;
 import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.WebView;
+import android.widget.Toast;
+
+import androidx.annotation.StringRes;
 
 import com.blankj.utilcode.util.KeyboardUtils;
 import com.blankj.utilcode.util.StringUtils;
@@ -45,7 +49,10 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -56,7 +63,7 @@ import mobile.Mobile;
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
  * @author <a href="https://github.com/wwxiaoqi">Jane Haring</a>
- * @version 1.3.0.0, Mar 5, 2025
+ * @version 1.4.0.4, May 23, 2025
  * @since 1.0.0
  */
 public final class Utils {
@@ -65,6 +72,29 @@ public final class Utils {
      * App version.
      */
     public static final String version = BuildConfig.VERSION_NAME;
+
+    /**
+     * App version code.
+     */
+    public static final int versionCode = BuildConfig.VERSION_CODE;
+
+    private static Toast currentToast;
+
+    public static void showToast(final Context context, final String message) {
+        if (currentToast != null) {
+            currentToast.cancel();
+        }
+        currentToast = Toast.makeText(context, message, Toast.LENGTH_LONG);
+        currentToast.show();
+    }
+
+    public static void showToast(final Context context, @StringRes int resId) {
+        if (currentToast != null) {
+            currentToast.cancel();
+        }
+        currentToast = Toast.makeText(context, resId, Toast.LENGTH_LONG);
+        currentToast.show();
+    }
 
     public static boolean isTablet(String userAgent) {
         if (StringUtils.isEmpty(userAgent)) {
@@ -96,26 +126,40 @@ public final class Utils {
         return applicationInfo.metaData.getString("CHANNEL");
     }
 
-
     private static long lastShowKeyboard = 0;
+    public static long lastFrontendForceHideKeyboard = 0;
 
     public static void registerSoftKeyboardToolbar(final Activity activity, final WebView webView) {
         KeyboardUtils.registerSoftInputChangedListener(activity, height -> {
             if (activity.isInMultiWindowMode()) {
+                Utils.logInfo("keyboard", "In multi window mode, do not show keyboard toolbar");
                 return;
             }
 
             final long now = System.currentTimeMillis();
+            if (lastFrontendForceHideKeyboard != 0 && now - lastFrontendForceHideKeyboard < 500) {
+                // 键盘被前端强制隐藏后短时间内又触发弹起，则再次强制隐藏键盘 https://github.com/siyuan-note/siyuan/issues/14589
+                webView.evaluateJavascript("javascript:hideKeyboardToolbar()", null);
+                //Utils.logInfo("keyboard", "Force hide keyboard toolbar");
+                lastFrontendForceHideKeyboard = 0;
+                return;
+            }
+
             if (KeyboardUtils.isSoftInputVisible(activity)) {
                 webView.evaluateJavascript("javascript:showKeyboardToolbar()", null);
                 lastShowKeyboard = now;
+                //Utils.logInfo("keyboard", "Show keyboard toolbar");
             } else {
                 if (now - lastShowKeyboard < 500) {
-                    // 短时间内键盘显示又隐藏，强制再次显示键盘 https://github.com/siyuan-note/siyuan/issues/11098#issuecomment-2273704439
+                    // 短时间内键盘显示又隐藏，则再次强制显示键盘 https://github.com/siyuan-note/siyuan/issues/11098#issuecomment-2273704439
                     KeyboardUtils.showSoftInput(activity);
+                    Utils.logInfo("keyboard", "Force show keyboard");
                     return;
                 }
                 webView.evaluateJavascript("javascript:hideKeyboardToolbar()", null);
+                //Utils.logInfo("keyboard", "Hide keyboard toolbar");
+                activity.getWindow().getDecorView().clearFocus();
+                webView.clearFocus();
             }
         });
     }
@@ -155,7 +199,7 @@ public final class Utils {
             */
             }
         } catch (final Exception e) {
-            Utils.LogError("boot", "unzip asset [from=" + zipName + ", to=" + targetDirectory + "] failed", e);
+            Utils.logError("boot", "unzip asset [from=" + zipName + ", to=" + targetDirectory + "] failed", e);
         } finally {
             if (null != zis) {
                 try {
@@ -187,13 +231,17 @@ public final class Utils {
                 }
             }
         } catch (final Exception e) {
-            LogError("network", "get IP list failed, returns 127.0.0.1", e);
+            logError("network", "get IP list failed, returns 127.0.0.1", e);
         }
         list.add("127.0.0.1");
         return TextUtils.join(",", list);
     }
 
-    public static void LogError(final String tag, final String msg, final Throwable e) {
+    public static void logError(final String tag, final String msg) {
+        logError(tag, msg, null);
+    }
+
+    public static void logError(final String tag, final String msg, final Throwable e) {
         synchronized (Utils.class) {
             if (null != e) {
                 Log.e(tag, msg, e);
@@ -226,7 +274,7 @@ public final class Utils {
         }
     }
 
-    public static void LogInfo(final String tag, final String msg) {
+    public static void logInfo(final String tag, final String msg) {
         synchronized (Utils.class) {
             Log.i(tag, msg);
             try {
@@ -310,5 +358,47 @@ public final class Utils {
         final Uri uri = Uri.parse(url);
         final Intent browserIntent = new Intent(Intent.ACTION_VIEW, uri);
         activity.startActivity(browserIntent);
+    }
+
+    public static String getLanguage() {
+        final Locale locale = LocaleList.getDefault().get(0); // 获取用户的设备首选语言
+        final String language = locale.getLanguage().toLowerCase(); // 获取语言代码
+        final String script = locale.getScript().toLowerCase(); // 获取脚本代码
+        final String country = locale.getCountry().toLowerCase(); // 获取国家代码
+
+        String ret;
+        if ("zh".equals(language)) {
+            // 检查是否为简体字脚本
+            if ("hans".equals(script)) {
+                ret = "zh_CN"; // 简体中文，使用 zh_CN
+            } else if ("hant".equals(script)) {
+                // 对于繁体字脚本，需要进一步检查国家代码
+                if ("tw".equals(country)) {
+                    ret = "zh_CHT"; // 繁体中文对应台湾
+                } else if ("hk".equals(country)) {
+                    ret = "zh_CHT"; // 繁体中文对应香港
+                } else {
+                    ret = "zh_CHT"; // 其他繁体中文情况也使用 zh_CHT
+                }
+            } else {
+                ret = "zh_CN"; // 如果脚本不是简体或繁体，默认为简体中文
+            }
+        } else {
+            // 对于非中文语言，创建一个映射来定义其他语言代码的对应关系
+            Map<String, String> otherLangMap = new HashMap<>();
+            otherLangMap.put("ar", "ar_SA");
+            otherLangMap.put("de", "de_DE");
+            otherLangMap.put("es", "es_ES");
+            otherLangMap.put("fr", "fr_FR");
+            otherLangMap.put("he", "he_IL");
+            otherLangMap.put("it", "it_IT");
+            otherLangMap.put("ja", "ja_JP");
+            otherLangMap.put("pl", "pl_PL");
+            otherLangMap.put("ru", "ru_RU");
+
+            // 使用 getOrDefault 方法从映射中获取语言代码，如果语言不存在则默认为 en_US
+            ret = otherLangMap.getOrDefault(language, "en_US");
+        }
+        return ret;
     }
 }
