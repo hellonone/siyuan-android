@@ -63,7 +63,7 @@ import mobile.Mobile;
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
  * @author <a href="https://github.com/wwxiaoqi">Jane Haring</a>
- * @version 1.4.0.4, May 23, 2025
+ * @version 1.4.0.5, Jun 15, 2025
  * @since 1.0.0
  */
 public final class Utils {
@@ -140,8 +140,16 @@ public final class Utils {
             if (lastFrontendForceHideKeyboard != 0 && now - lastFrontendForceHideKeyboard < 500) {
                 // 键盘被前端强制隐藏后短时间内又触发弹起，则再次强制隐藏键盘 https://github.com/siyuan-note/siyuan/issues/14589
                 webView.evaluateJavascript("javascript:hideKeyboardToolbar()", null);
-                //Utils.logInfo("keyboard", "Force hide keyboard toolbar");
-                lastFrontendForceHideKeyboard = 0;
+                KeyboardUtils.hideSoftInput(activity);
+                //Utils.logInfo("keyboard", "Force hide keyboard");
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(500);
+                        lastFrontendForceHideKeyboard = 0;
+                    } catch (final Exception e) {
+                        Utils.logError("runtime", "sleep failed", e);
+                    }
+                }).start();
                 return;
             }
 
@@ -153,7 +161,7 @@ public final class Utils {
                 if (now - lastShowKeyboard < 500) {
                     // 短时间内键盘显示又隐藏，则再次强制显示键盘 https://github.com/siyuan-note/siyuan/issues/11098#issuecomment-2273704439
                     KeyboardUtils.showSoftInput(activity);
-                    Utils.logInfo("keyboard", "Force show keyboard");
+                    //Utils.logInfo("keyboard", "Force show keyboard");
                     return;
                 }
                 webView.evaluateJavascript("javascript:hideKeyboardToolbar()", null);
@@ -394,6 +402,7 @@ public final class Utils {
             otherLangMap.put("it", "it_IT");
             otherLangMap.put("ja", "ja_JP");
             otherLangMap.put("pl", "pl_PL");
+            otherLangMap.put("pt", "pt_BR");
             otherLangMap.put("ru", "ru_RU");
 
             // 使用 getOrDefault 方法从映射中获取语言代码，如果语言不存在则默认为 en_US
