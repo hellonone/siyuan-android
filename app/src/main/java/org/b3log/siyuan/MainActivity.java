@@ -30,7 +30,6 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.LocaleList;
 import android.os.Looper;
 import android.os.Message;
 import android.provider.MediaStore;
@@ -51,6 +50,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.window.OnBackInvokedDispatcher;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -80,9 +80,6 @@ import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
 import java.util.TimeZone;
 
 import mobile.Mobile;
@@ -91,7 +88,7 @@ import mobile.Mobile;
  * 主程序.
  *
  * @author <a href="https://88250.b3log.org">Liang Ding</a>
- * @version 1.1.1.9, Jul 4, 2025
+ * @version 1.1.1.11, Sep 30, 2025
  * @since 1.0.0
  */
 public class MainActivity extends AppCompatActivity implements com.blankj.utilcode.util.Utils.OnAppStatusChangedListener {
@@ -133,6 +130,10 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
             getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::goBack);
+        }
+
         // 启动 HTTP Server
         startHttpServer();
 
@@ -159,13 +160,14 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
         if (Utils.isTablet(userAgent)) {
             // 平板上隐藏状态栏 Hide the status bar on tablet https://github.com/siyuan-note/siyuan/issues/12204
             BarUtils.setStatusBarVisibility(this, false);
-            BarUtils.setNavBarVisibility(this, false);
             Log.i("boot", "Hide status bar on tablet");
         } else {
             // 沉浸式状态栏设置
             UltimateBarX.statusBarOnly(this).transparent().light(false).color(Color.parseColor("#1e1e1e")).apply();
             ((ViewGroup) webView.getParent()).setPadding(0, UltimateBarX.getStatusBarHeight(), 0, 0);
         }
+
+        BarUtils.setNavBarVisibility(this, false);
 
         // Fix https://github.com/siyuan-note/siyuan/issues/9726
         // KeyboardUtils.fixAndroidBug5497(this);
@@ -565,6 +567,10 @@ public class MainActivity extends AppCompatActivity implements com.blankj.utilco
 
     @Override
     public void onBackPressed() {
+        goBack();
+    }
+
+    private void goBack() {
         webView.evaluateJavascript("javascript:window.goBack ? window.goBack() : window.history.back()", null);
     }
 
